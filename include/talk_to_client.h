@@ -13,6 +13,7 @@
 #include <boost/shared_ptr.hpp>
 #include <boost/thread.hpp>
 #include <boost/bind.hpp>
+#include <queue>
 #include "common.h"
 
 
@@ -35,7 +36,7 @@ public:
     void stop();
 
     void do_read();
-    void handle_read(boost::shared_ptr<std::vector<char>> read_ptr,const boost::system::error_code& err,size_t bytes);
+    void handle_read(const boost::system::error_code& err,size_t bytes);
 
 
     void do_write(std::string &messsage);
@@ -51,6 +52,8 @@ public:
     void del_client();
     void handle_handshake(const boost::system::error_code& error);
     void close();
+    static void* threadFunc(void *arg);
+    int read_completion(const boost::system::error_code & ec,size_t bytes);
 private:
 #ifdef ASIO_SSL
     ssl_socket m_socket;
@@ -58,11 +61,14 @@ private:
     boost::asio::ip::tcp::socket m_socket;
 #endif
     bool m_bStart;
-    enum {max_msg = MAX_MSG_NUM};
+    //enum {max_msg = MAX_MSG_NUM};
     ReceiveData m_receive_data;
     boost::asio::ip::tcp::endpoint m_ep;
     bool m_client_changed;
+    //queue<string> m_receive_msg_queue;
     int m_read_count;
+    size_t headlen;
+    char m_read_buf[MAX_MSG];
 };
 
 #endif //HBAUDITFLOW_CTALK_TO_CLIENT_H

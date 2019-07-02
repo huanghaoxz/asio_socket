@@ -45,7 +45,7 @@ public:
 
     void handle_write(const boost::system::error_code &err, size_t bytes);
 
-    void handle_read(boost::shared_ptr<std::vector<char>> read_ptr, const boost::system::error_code &err, size_t bytes);
+    void handle_read(const boost::system::error_code &err, size_t bytes);
 
     void set_receive_data(void *receivedata);
 
@@ -59,21 +59,18 @@ public:
     //void handle_talk_to_server_thread();
     void start_timer(const boost::system::error_code &err);
 
-    static void* threadFunc(void *arg);
-
+    static void* write_func(void *arg);
+    int read_completion(const boost::system::error_code& ec, size_t bytes_transferred);
+    int get_read_count();
 private:
     boost::asio::io_service &m_service;
-    deadline_timer m_timer;
 #ifdef ASIO_SSL
     ssl_socket m_socket;
 #else
     boost::asio::ip::tcp::socket m_socket;
 #endif
-
+    deadline_timer m_timer;
     boost::asio::ip::tcp::endpoint m_ep;
-    enum {
-        max_msg = MAX_MSG_NUM
-    };
     bool m_bStart;
     char m_read_buffer[MAX_MSG];
     char m_write_buffer[MAX_MSG];
@@ -83,6 +80,8 @@ private:
     int m_write_count;
     int m_send_count;
     int m_read_count;
+    char m_read_buf[MAX_MSG];
+    size_t headlen;
 };
 
 #endif //HBAUDITFLOW_CTALK_TO_SERVER_H

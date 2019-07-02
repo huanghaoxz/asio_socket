@@ -7,17 +7,15 @@
 
 #include <boost/asio/ssl.hpp>
 
-#define MAX_MSG_NUM 4096
+//#define MAX_MSG_NUM 2048
 #define THREAD_NUM 1
-#define MAX_MSG 4096
-#define ASIO_SSL
+#define MAX_MSG 2048
+//#define ASIO_SSL
 
 class CTalk_to_client;
 typedef boost::shared_ptr<CTalk_to_client> client_ptr;
 //定义一个回调函数将数据传输到应用层
-typedef void(*ReceiveData)(std::string & message,int size,int fd,int &nstatis);
-
-//typedef void(*ReceiveData_server)(std::string & message,int size,client_ptr &ptr);
+typedef void(*ReceiveData)(std::string & message,int size,int fd);
 
 class CTalk_to_server;
 typedef boost::shared_ptr<CTalk_to_server>  talk_to_server_ptr;
