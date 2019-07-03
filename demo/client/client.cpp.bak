@@ -1,0 +1,54 @@
+#include <string>
+#include <vector>
+#include "client.h"
+#include "hbla_log4.h"
+
+
+using namespace std;
+
+HbLog *hb_log = new HbLog();
+
+void receive_data(std::string &message,int bytes,int fd)
+{
+    cout << message <<"  " << bytes << "fd " << fd <<endl;
+    //string msg  = "123456";
+    //server.send_msg(fd,msg);
+}
+
+vector<CClient*> m_vClient;
+int main()
+{
+    string ip = "10.0.1.106";
+    short port = 8888;
+    for(int i = 0;i< 1;i++)
+    {
+        CClient* client = new CClient(ip,port,asio::ssl::context::sslv23_client);//应该先设置这些属性，然后在进行连接,所以设计有误
+        client->context().set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2);
+        client->context().set_verify_mode(asio::ssl::context::verify_peer | asio::ssl::context::verify_fail_if_no_peer_cert);
+        client->context().load_verify_file("certs/server.crt");
+        client->context().use_certificate_chain_file("client_certs/client.crt");
+        client->context().use_private_key_file("client_certs/priv.key", asio::ssl::context::pem);
+        client->set_receive_data((void*)receive_data);
+        client->start();
+        sleep(1);
+        for(int j = 0;j<10;j++)
+        {
+            string msg = "abcd";
+            //std::cout << msg<< std::endl;
+            client->send_msg(msg);
+        }
+        //m_vClient.push_back(client);
+    }
+    sleep(16);
+    vector<CClient*>::iterator it = m_vClient.begin();
+    for (it;it!=m_vClient.end();++it) {
+        (*it)->stop();
+    }
+
+
+    while (true)
+    {
+
+    }
+    return 0;
+}
