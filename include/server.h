@@ -29,6 +29,7 @@ public:
     ~CServer();
 
     void start();
+    void stop();
     void handle_accept(client_ptr client, const boost::system::error_code &err);
     void handle_talk_to_client_thread();
 
@@ -42,7 +43,6 @@ private:
     boost::asio::io_service service;//这个不能放成全局变量，因为要是放成全局变量的化,必须要先有io_service,不能先有CService
     ip::tcp::acceptor m_acceptor;
     boost::recursive_mutex m_clients_cs;
-    //array_clients m_clients;
     ReceiveData m_receive_data;
     boost::asio::ssl::context m_content;
 };

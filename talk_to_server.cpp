@@ -11,6 +11,7 @@
 
 pthread_mutex_t send_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t send_msg_cont = PTHREAD_COND_INITIALIZER;
+boost::recursive_mutex g_mutex;
 
 //CTalk_to_server::CTalk_to_server() : m_socket(m_service),m_timer(m_service,boost::bind(&CTalk_to_server::start_timer,this)){
 #ifdef ASIO_SSL
@@ -31,7 +32,7 @@ CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl:
     m_bStart = false;
     headlen = 0;
     m_endpoint_iterator = endpoint_iterator;
-    memset(m_read_buf,0,MAX_MSG);
+    memset(m_read_buf, 0, MAX_MSG);
 #ifdef ASIO_SSL
     //m_socket(ios, m);
 #else
@@ -147,22 +148,16 @@ bool CTalk_to_server::started() const {
 }
 
 int CTalk_to_server::read_completion(const boost::system::error_code &ec, size_t bytes_transferred) {
-    if(ec)
-    {
-        hbla_log_error("read_completion error value=%d, message=%s",ec.value(),ec.message().c_str());
+    if (ec) {
         return 0;
-    }
-    else
-    {
-        if(bytes_transferred == sizeof(uint16_t))
-        {
+    } else {
+        if (bytes_transferred == sizeof(uint16_t)) {
             uint16_t head;
             memcpy(&head, m_read_buf, sizeof(uint16_t));
             headlen = ntohs(head);
             //cout << "headlen" << headlen << endl;
         }
-        if(headlen+ sizeof(uint16_t) == bytes_transferred)
-        {
+        if (headlen + sizeof(uint16_t) == bytes_transferred) {
             headlen = 0;
             return 0;
         }
@@ -188,9 +183,12 @@ void CTalk_to_server::do_read() {
                                          boost::asio::placeholders::bytes_transferred()));
 #endif
 
-    memset(m_read_buf,0,MAX_MSG);
+    memset(m_read_buf, 0, MAX_MSG);
 #if defined(LEN_BODY)
-    async_read(m_socket, boost::asio::buffer(m_read_buf), [this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
+    async_read(m_socket, boost::asio::buffer(m_read_buf), [this](const boost::system::error_code &ec,
+                                                                 size_t bytes_transferred) -> size_t {
+                   return this->read_completion(ec, bytes_transferred);
+               },
                boost::bind(&CTalk_to_server::handle_read, shared_from_this(),
                            boost::asio::placeholders::error,
                            boost::asio::placeholders::bytes_transferred()));
@@ -216,7 +214,7 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
     {
         string message = "";
 #if defined(LEN_BODY)
-        message = m_read_buf+2;
+        message = m_read_buf + 2;
 #elif defined(FIX_LEN)
         message = m_read_buf;
 #else
@@ -226,13 +224,15 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
 #ifdef ASIO_SSL
         m_receive_data(message, bytes, m_socket.lowest_layer().native(),m_read_count);
 #else
-        hbla_log_info("read count %d",m_read_count++);
+        hbla_log_info("read count %d", m_read_count++);
         m_receive_data(message, bytes, m_socket.native());
 #endif
         do_read();
     } else {
+        if (err.value() != boost::system::errc::operation_canceled) {
+            hbla_log_error("bytes:%d err value:%d %s", bytes, err.value(), err.message().c_str());
+        }
         //当bytes =0时表示，非阻塞套接字,读取时没有数据返回0,服务端断开连接 bytes =0
-        hbla_log_error("bytes:%d err value:%d %s", bytes, err.value(), err.message().c_str());
         close();
     }
 #endif
@@ -271,6 +271,11 @@ void CTalk_to_server::set_receive_data(void *receivedata) {
 }
 
 void CTalk_to_server::close() {
+    boost::recursive_mutex::scoped_lock lk(g_mutex);
+    if(!m_bStart)
+    {
+        return;
+    }
 #ifdef ASIO_SSL
     if (m_socket.lowest_layer().is_open()) {
     m_socket.lowest_layer().close();
@@ -280,8 +285,6 @@ void CTalk_to_server::close() {
 #else
     if (m_socket.is_open()) {
         m_socket.close();
-        //m_socket.lowest_layer().shutdown();
-        //m_socket.shutdown();
     }
 #endif
     m_bStart = false;
@@ -327,7 +330,6 @@ void *CTalk_to_server::write_func(void *arg) {
 #endif
 
 
-
 #if 0
         char write_buffer[max_msg] = {0};
         std::copy(body.begin(), body.end(), write_buffer);
@@ -357,8 +359,7 @@ void CTalk_to_server::send_msg() {
     pthread_create(&m_tid, NULL, write_func, (void *) this);
 }
 
-int CTalk_to_server::get_read_count()
-{
+int CTalk_to_server::get_read_count() {
     return m_read_count;
 }
 

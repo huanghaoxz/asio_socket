@@ -36,6 +36,8 @@ public:
 
     void stop();
 
+    bool started();
+
     void do_read();
     void handle_read(const boost::system::error_code& err,size_t bytes);
 

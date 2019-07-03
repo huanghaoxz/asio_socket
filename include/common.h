@@ -11,8 +11,8 @@
 #define THREAD_NUM 1
 #define MAX_MSG 2048
 //#define ASIO_SSL
-//#define LEN_BODY
-#define FIX_LEN
+#define LEN_BODY
+//#define FIX_LEN
 
 class CTalk_to_client;
 typedef boost::shared_ptr<CTalk_to_client> client_ptr;

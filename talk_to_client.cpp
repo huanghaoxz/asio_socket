@@ -11,6 +11,7 @@ int CTalk_to_client::clientnum = 0;
 
 pthread_mutex_t recv_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t recv_msg_cont = PTHREAD_COND_INITIALIZER;
+boost::recursive_mutex g_mutex;
 #ifdef ASIO_SSL
 CTalk_to_client::CTalk_to_client(boost::asio::io_service &service, boost::asio::ssl::context &m) : m_socket(service,m) {
 #else
@@ -20,7 +21,7 @@ CTalk_to_client::CTalk_to_client(boost::asio::io_service &service, boost::asio::
     m_bStart = false;
     m_read_count = 0;
     headlen = 0;
-    memset(m_read_buf,0,MAX_MSG);
+    memset(m_read_buf, 0, MAX_MSG);
 }
 
 CTalk_to_client::~CTalk_to_client() {
@@ -67,6 +68,8 @@ void CTalk_to_client::stop() {
     if (!m_bStart) {
         return;
     }
+    boost::system::error_code ec;
+    m_socket.cancel(ec);
     close();
 }
 
@@ -82,21 +85,18 @@ void CTalk_to_client::del_client() {
 
 int CTalk_to_client::read_completion(const boost::system::error_code &ec, size_t bytes_transferred) {
     //cout << "bytes_transferred"<<bytes_transferred<<endl;
-    if(ec)
-    {
-        hbla_log_error("read_completion error value=%d, message=%s",ec.value(),ec.message().c_str());
+    if (ec) {
+        if (ec.value() != 2 && ec.value() != 125) {
+            hbla_log_error("read_completion error value=%d, message=%s", ec.value(), ec.message().c_str());
+        }
         return 0;
-    }
-    else
-    {
-        if(bytes_transferred == sizeof(uint16_t))
-        {
+    } else {
+        if (bytes_transferred == sizeof(uint16_t)) {
             uint16_t head;
             memcpy(&head, m_read_buf, sizeof(uint16_t));
             headlen = ntohs(head);
         }
-        if(headlen+ sizeof(uint16_t) == bytes_transferred)
-        {
+        if (headlen + sizeof(uint16_t) == bytes_transferred) {
             headlen = 0;
             return 0;
         }
@@ -111,9 +111,12 @@ void CTalk_to_client::do_read() {
         return;
     }
     //每个客户端读取自己的
-    memset(m_read_buf,0,MAX_MSG);
+    memset(m_read_buf, 0, MAX_MSG);
 #if defined(LEN_BODY)
-    async_read(m_socket,boost::asio::buffer(m_read_buf),[this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
+    async_read(m_socket, boost::asio::buffer(m_read_buf), [this](const boost::system::error_code &ec,
+                                                                 size_t bytes_transferred) -> size_t {
+                   return this->read_completion(ec, bytes_transferred);
+               },
                boost::bind(&CTalk_to_client::handle_read, shared_from_this(), _1, _2));
 #elif defined(FIX_LEN)
     async_read(m_socket,boost::asio::buffer(m_read_buf),transfer_exactly(MAX_MSG),
@@ -132,7 +135,7 @@ void CTalk_to_client::handle_read(const boost::system::error_code &err,
         //std::cout << "read bytes:" << bytes << std::endl;
         string message = "";
 #if defined(LEN_BODY)
-        message = m_read_buf+2;
+        message = m_read_buf + 2;
 #elif defined(FIX_LEN)
         message = m_read_buf;
 #else
@@ -143,19 +146,21 @@ void CTalk_to_client::handle_read(const boost::system::error_code &err,
         m_receive_data(message, bytes, m_socket.lowest_layer().native(),m_read_count);
 #else
         m_receive_data(message, bytes, m_socket.native());
-        hbla_log_info("read count = %d",m_read_count++);
+        hbla_log_info("read count = %d", m_read_count++);
 #endif
         do_read();
     } else {
         //可以将保存的数组减少1
         //当bytes =0时表示，非阻塞套接字,读取时没有数据返回0,服务端断开连接 bytes = 0
         //客户端断开也是一个错误,可根据协议来解决正常退出
+        if (err.value() != 2 && err.value() != 125) {
 #ifdef ASIO_SSL
-        hbla_log_error("socket id:%d bytes:%d  err code:%d  error:%s",m_socket.lowest_layer().native(),bytes, err.value(), err.message().c_str());
+            hbla_log_error("socket id:%d bytes:%d  err code:%d  error:%s",m_socket.lowest_layer().native(),bytes, err.value(), err.message().c_str());
 #else
-        hbla_log_error("socket id:%d bytes:%d  err code:%d  error:%s", m_socket.native(), bytes, err.value(),
-                       err.message().c_str());
+            hbla_log_error("socket id:%d bytes:%d  err code:%d  error:%s", m_socket.native(), bytes, err.value(),
+                           err.message().c_str());
 #endif
+        }
         close();
     }
 }
@@ -176,6 +181,7 @@ ssl_socket::lowest_layer_type &CTalk_to_client::get_socket() {
 
 
 void CTalk_to_client::do_write(std::string &messsage) {
+    if (!m_bStart) { return; }
     if (messsage.size() > MAX_MSG) {
         hbla_log_error("msg size is too big");
     } else {
@@ -226,6 +232,10 @@ void CTalk_to_client::set_client_changed() {
 }
 
 void CTalk_to_client::close() {
+    boost::recursive_mutex::scoped_lock lk(g_mutex);
+    if (!m_bStart) {
+        return;
+    }
 #ifdef ASIO_SSL
     if (m_socket.lowest_layer().is_open()) {
         hbla_log_info("socket id %d closse", m_socket.lowest_layer().native());
@@ -240,4 +250,9 @@ void CTalk_to_client::close() {
     }
 #endif
     m_bStart = false;
+}
+
+bool CTalk_to_client::started()
+{
+    return m_bStart;
 }
