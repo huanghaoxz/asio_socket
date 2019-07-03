@@ -76,11 +76,10 @@ void CServer::stop() {
         for (it; it != m_clients.end(); it++) {
             if ((*it)->started()) {
                 (*it)->stop();
-                //m_clients.erase(it);
-                //(*it) = NULL;
             }
         }
     }
+    m_clients.clear();
 }
 
 void CServer::stop_client(client_ptr client) {
