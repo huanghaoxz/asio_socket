@@ -68,15 +68,16 @@ void CServer::update_clients_changed() {
 }
 
 void CServer::stop() {
-    //boost::recursive_mutex::scoped_lock lk(m_cs);
+    boost::recursive_mutex::scoped_lock lk(m_cs);
+    cout << "stop" << endl;
     if(m_clients.size()>0)
     {
         array_clients::iterator it = m_clients.begin();
-        for (; it != m_clients.end(); ++it) {
-            if ((*it!=NULL) && (*it)->started()) {
+        for (it; it != m_clients.end(); it++) {
+            if ((*it)->started()) {
                 (*it)->stop();
-                m_clients.erase(it);
-                it->reset();
+                //m_clients.erase(it);
+                //(*it) = NULL;
             }
         }
     }
