@@ -7,6 +7,7 @@
 #include <boost/lexical_cast.hpp>
 #include "talk_to_server.h"
 #include "hb_log4def.h"
+#include "packer.h"
 
 pthread_mutex_t send_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t send_msg_cont = PTHREAD_COND_INITIALIZER;
@@ -146,8 +147,6 @@ bool CTalk_to_server::started() const {
 }
 
 int CTalk_to_server::read_completion(const boost::system::error_code &ec, size_t bytes_transferred) {
-
-        cout << "bytes_transferred"<<bytes_transferred<<endl;
     if(ec)
     {
         hbla_log_error("read_completion error value=%d, message=%s",ec.value(),ec.message().c_str());
@@ -160,7 +159,7 @@ int CTalk_to_server::read_completion(const boost::system::error_code &ec, size_t
             uint16_t head;
             memcpy(&head, m_read_buf, sizeof(uint16_t));
             headlen = ntohs(head);
-            cout << "headlen" << headlen << endl;
+            //cout << "headlen" << headlen << endl;
         }
         if(headlen+ sizeof(uint16_t) == bytes_transferred)
         {
@@ -188,8 +187,19 @@ void CTalk_to_server::do_read() {
                                          boost::asio::placeholders::error,
                                          boost::asio::placeholders::bytes_transferred()));
 #endif
-#if 1
+
     memset(m_read_buf,0,MAX_MSG);
+#if defined(LEN_BODY)
+    async_read(m_socket, boost::asio::buffer(m_read_buf), [this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
+               boost::bind(&CTalk_to_server::handle_read, shared_from_this(),
+                           boost::asio::placeholders::error,
+                           boost::asio::placeholders::bytes_transferred()));
+#elif defined(FIX_LEN)
+    async_read(m_socket, boost::asio::buffer(m_read_buf), transfer_exactly(MAX_MSG),
+               boost::bind(&CTalk_to_server::handle_read, shared_from_this(),
+                           boost::asio::placeholders::error,
+                           boost::asio::placeholders::bytes_transferred()));
+#else
     async_read(m_socket, boost::asio::buffer(m_read_buf), [this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
                boost::bind(&CTalk_to_server::handle_read, shared_from_this(),
                            boost::asio::placeholders::error,
@@ -205,9 +215,14 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
     if (!err)//没有错误
     {
         string message = "";
-        //message.assign(read_ptr->begin(), read_ptr->begin() + bytes);
+#if defined(LEN_BODY)
         message = m_read_buf+2;
-        //cout << "handle read " << message << endl;
+#elif defined(FIX_LEN)
+        message = m_read_buf;
+#else
+        message = m_read_buf+2;
+#endif
+
 #ifdef ASIO_SSL
         m_receive_data(message, bytes, m_socket.lowest_layer().native(),m_read_count);
 #else
@@ -287,16 +302,31 @@ void *CTalk_to_server::write_func(void *arg) {
         }
 
         string body = client->m_vSendMsg.front();
-        auto total_len = body.size();
-        auto head_len = htons(body.size());
-        string *msg = new string;
-        msg->reserve(total_len);
-        msg->append((const char *) &head_len, sizeof(uint16_t));
-        msg->append(body);
-
-        client->m_socket.async_write_some(buffer(*msg), boost::bind(&CTalk_to_server::handle_write, client,
+        //auto total_len = body.size();
+        //auto head_len = htons(body.size());
+        //string *msg = new string;
+        //msg->reserve(total_len);
+        //msg->append((const char *) &head_len, sizeof(uint16_t));
+        //msg->append(body);
+        packer m_packer;
+#if defined(LEN_BODY)
+        string msg = m_packer.pack_msg_len_body(body);
+        client->m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, client,
                                                                    boost::asio::placeholders::error,
                                                                    boost::asio::placeholders::bytes_transferred()));
+#elif defined(FIX_LEN)
+        string msg = m_packer.pack_msg_fix_length(body,MAX_MSG);
+        async_write(client->m_socket,buffer(msg,MAX_MSG),boost::bind(&CTalk_to_server::handle_write, client,
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
+#else
+        string msg = m_packer.pack_msg_len_body(body);
+        client->m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, client,
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
+#endif
+
+
 
 #if 0
         char write_buffer[max_msg] = {0};

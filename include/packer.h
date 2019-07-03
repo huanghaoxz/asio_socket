@@ -10,12 +10,10 @@ using namespace std;
 
 class packer {
 public:
-    packer(const string &message);
+    packer();
     ~packer();
-    pack_msg_fix_length();
-    pack_msg_len_body();
-private:
-    string m_message;
+    string pack_msg_fix_length(const string &message,int size);
+    string pack_msg_len_body(const string &message);
 };
 
 

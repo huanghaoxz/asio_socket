@@ -12,16 +12,11 @@ using namespace std;
 class unpacker
 {
 public:
-    unpacker(const string & msg);
+    unpacker();
     ~unpacker();
     bool parse_msg_len_body();
     bool parse_msg_fix_len();
-
 private:
-    string m_message;
-    size_t m_bytes_transferred;
-    size_t m_remain_bytes;
-    queue<string> m_read_msg_queue;
 };
 
 #endif //HBAUDITFLOW_UNPACKER_H

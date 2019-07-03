@@ -112,9 +112,17 @@ void CTalk_to_client::do_read() {
     }
     //每个客户端读取自己的
     memset(m_read_buf,0,MAX_MSG);
-
+#if defined(LEN_BODY)
     async_read(m_socket,boost::asio::buffer(m_read_buf),[this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
+               boost::bind(&CTalk_to_client::handle_read, shared_from_this(), _1, _2));
+#elif defined(FIX_LEN)
+    async_read(m_socket,boost::asio::buffer(m_read_buf),transfer_exactly(MAX_MSG),
                              boost::bind(&CTalk_to_client::handle_read, shared_from_this(), _1, _2));
+#else
+        async_read(m_socket,boost::asio::buffer(m_read_buf),[this](const boost::system::error_code & ec, size_t bytes_transferred)->size_t {return this->read_completion(ec, bytes_transferred);},
+                             boost::bind(&CTalk_to_client::handle_read, shared_from_this(), _1, _2));
+#endif
+
 }
 
 void CTalk_to_client::handle_read(const boost::system::error_code &err,
@@ -123,8 +131,14 @@ void CTalk_to_client::handle_read(const boost::system::error_code &err,
     {
         //std::cout << "read bytes:" << bytes << std::endl;
         string message = "";
-        //message.assign(read_ptr->begin(), read_ptr->begin() + bytes);
+#if defined(LEN_BODY)
         message = m_read_buf+2;
+#elif defined(FIX_LEN)
+        message = m_read_buf;
+#else
+        message = m_read_buf+2;
+#endif
+
 #ifdef ASIO_SSL
         m_receive_data(message, bytes, m_socket.lowest_layer().native(),m_read_count);
 #else
@@ -166,15 +180,28 @@ void CTalk_to_client::do_write(std::string &messsage) {
         hbla_log_error("msg size is too big");
     } else {
 #if 1
-        auto total_len = messsage.size();
-        auto head_len = htons(messsage.size());
-        string *msg = new string;
-        msg->reserve(total_len);
-        msg->append((const char *) &head_len, sizeof(uint16_t));
-        msg->append(messsage);
-        m_socket.async_write_some(buffer(*msg),
+        //auto total_len = messsage.size();
+        //auto head_len = htons(messsage.size());
+        //string *msg = new string;
+        //msg->reserve(total_len);
+        //msg->append((const char *) &head_len, sizeof(uint16_t));
+        //msg->append(messsage);
+        packer m_packer;
+#if  defined(LEN_BODY)
+        string msg = m_packer.pack_msg_len_body(messsage);
+        m_socket.async_write_some(buffer(msg),
                                   boost::bind(&CTalk_to_client::handle_write, shared_from_this(), _1, _2));
-        delete msg;
+#elif defined(FIX_LEN)
+        string msg = m_packer.pack_msg_fix_length(messsage,MAX_MSG);
+        async_write(m_socket,buffer(msg,MAX_MSG),
+                                  boost::bind(&CTalk_to_client::handle_write, shared_from_this(), _1, _2));
+#else
+         string msg = m_packer.pack_msg_len_body(messsage);
+         m_socket.async_write_some(buffer(msg),
+                                  boost::bind(&CTalk_to_client::handle_write, shared_from_this(), _1, _2));
+#endif
+
+        //delete msg;
 #endif
 #if 0
         char write_buffer[max_msg] = {0};
