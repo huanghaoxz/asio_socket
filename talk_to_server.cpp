@@ -33,13 +33,8 @@ CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl:
     headlen = 0;
     m_endpoint_iterator = endpoint_iterator;
     memset(m_read_buf, 0, MAX_MSG);
-#ifdef ASIO_SSL
-    //m_socket(ios, m);
-#else
-    //m_socket(ios);
-#endif
-    //m_timer.expires_from_now(boost::posix_time::seconds(3));
-    //m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
+    m_timer.expires_from_now(boost::posix_time::seconds(3));
+    m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
 }
 
 CTalk_to_server::~CTalk_to_server() {
@@ -229,7 +224,7 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
 #endif
         do_read();
     } else {
-        if (err.value() != boost::system::errc::operation_canceled) {
+        if (err.value() != boost::system::errc::operation_canceled && err.value()!=2) {
             hbla_log_error("bytes:%d err value:%d %s", bytes, err.value(), err.message().c_str());
         }
         //当bytes =0时表示，非阻塞套接字,读取时没有数据返回0,服务端断开连接 bytes =0
@@ -272,10 +267,6 @@ void CTalk_to_server::set_receive_data(void *receivedata) {
 
 void CTalk_to_server::close() {
     boost::recursive_mutex::scoped_lock lk(g_mutex);
-    if(!m_bStart)
-    {
-        return;
-    }
 #ifdef ASIO_SSL
     if (m_socket.lowest_layer().is_open()) {
     m_socket.lowest_layer().close();
@@ -287,6 +278,10 @@ void CTalk_to_server::close() {
         m_socket.close();
     }
 #endif
+    if(m_bStart)
+    {
+        hbla_log_info("client is closing");
+    }
     m_bStart = false;
 }
 

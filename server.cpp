@@ -69,11 +69,16 @@ void CServer::update_clients_changed() {
 
 void CServer::stop() {
     boost::recursive_mutex::scoped_lock lk(m_cs);
+    //for (int i = 0; i < THREAD_NUM; ++i) {
+    if (m_acceptor.is_open()) {
+        m_acceptor.close();
+    }
+    service.stop();
+    //}
     cout << "stop" << endl;
-    if(m_clients.size()>0)
-    {
+    if (m_clients.size() > 0) {
         array_clients::iterator it = m_clients.begin();
-        for (it; it != m_clients.end(); it++) {
+        for (; it != m_clients.end(); it++) {
             if ((*it)->started()) {
                 (*it)->stop();
             }
