@@ -22,9 +22,10 @@ SET(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
 
 INCLUDE_DIRECTORIES(
         ./include
-        /usr/local/boost/include
         ../log4/include
         /usr/local/log4cpp/include
+        /usr/local/boost/include
+        /usr/local/openssl/include
         )
 
 

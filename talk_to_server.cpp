@@ -5,37 +5,70 @@
 #include <boost/thread.hpp>
 #include <pthread.h>
 #include <boost/lexical_cast.hpp>
+#include <boost/thread/mutex.hpp>
+#include <net/if.h>
 #include "talk_to_server.h"
 #include "hb_log4def.h"
 #include "packer.h"
 
+using boost::asio::local::stream_protocol;
 pthread_mutex_t send_msg_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t send_msg_cont = PTHREAD_COND_INITIALIZER;
 boost::recursive_mutex g_mutex;
 
 //CTalk_to_server::CTalk_to_server() : m_socket(m_service),m_timer(m_service,boost::bind(&CTalk_to_server::start_timer,this)){
-#ifdef ASIO_SSL
-CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl::context &m,
-                                 boost::asio::ip::tcp::resolver::iterator endpoint_iterator) : m_service(ios),
-                                                                                               m_socket(ios,m),
-                                                                                               m_timer(ios) {
-#else
+#if defined(ASIO_SSL)
 
 CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios, boost::asio::ssl::context &m,
                                  boost::asio::ip::tcp::resolver::iterator endpoint_iterator) : m_service(ios),
-                                                                                               m_socket(ios),
-                                                                                               m_timer(ios) {
-#endif
-    m_write_count = 0;
+                                                                                               m_socket(ios, m),
+                                                                                               m_timer(ios)
+                                                                                               {
+   m_write_count = 0;
     m_send_count = 0;
     m_read_count = 0;
     m_bStart = false;
     headlen = 0;
     m_endpoint_iterator = endpoint_iterator;
     memset(m_read_buf, 0, MAX_MSG);
-    m_timer.expires_from_now(boost::posix_time::seconds(3));
-    m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
+    //m_timer.expires_from_now(boost::posix_time::seconds(3));
+    //m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
 }
+
+#elif defined(ASIO_TCP)
+
+CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios,
+                                 boost::asio::ip::tcp::resolver::iterator endpoint_iterator) : m_service(ios),
+                                                                                               m_socket(ios),
+                                                                                               m_timer(ios) {
+   m_write_count = 0;
+    m_send_count = 0;
+    m_read_count = 0;
+    m_bStart = false;
+    headlen = 0;
+    m_endpoint_iterator = endpoint_iterator;
+    memset(m_read_buf, 0, MAX_MSG);
+    //m_timer.expires_from_now(boost::posix_time::seconds(3));
+    //m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
+}
+
+#elif defined(ASIO_LOCAL)
+
+CTalk_to_server::CTalk_to_server(boost::asio::io_service &ios,const std::string filename):m_service(ios),m_socket(ios),m_timer(ios) {
+    m_write_count = 0;
+    m_send_count = 0;
+    m_read_count = 0;
+    m_bStart = false;
+    headlen = 0;
+    //m_endpoint_iterator = endpoint_iterator;
+    memset(m_read_buf, 0, MAX_MSG);
+    m_filename = filename;
+    //m_timer.expires_from_now(boost::posix_time::seconds(3));
+    //m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
+}
+
+#else
+#endif
 
 CTalk_to_server::~CTalk_to_server() {
 
@@ -45,27 +78,37 @@ void CTalk_to_server::start_timer(const boost::system::error_code &err) {
 
     if (!err) {
         if (!m_bStart) {
-#ifdef ASIO_SSL
+#if defined(ASIO_SSL)
             if (!m_socket.lowest_layer().is_open()) {
                 m_socket.lowest_layer().async_connect(m_ep,
                                                       boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
                                                                   boost::asio::placeholders::error));
-#else
+            }
+#elif defined(ASIO_TCP)
             if (!m_socket.is_open()) {
                 m_socket.async_connect(m_ep,
                                        boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
                                                    boost::asio::placeholders::error));
-#endif
             }
-        } else {
-            //hbla_log_info("start_timer %s", err.message().c_str());
-            //close();
+#elif defined(ASIO_LOCAL)
+            if (!m_socket.is_open()) {
+                m_socket.async_connect(boost::asio::local::stream_protocol::endpoint(LINUX_DOMAIN),
+                                       boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
+                                                   boost::asio::placeholders::error));
+            }
+#else
+#endif
+            else {
+                //hbla_log_info("start_timer %s", err.message().c_str());
+                //close();
+            }
+            m_timer.expires_at(m_timer.expires_at() + posix_time::millisec(2000));
+            m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
         }
-        m_timer.expires_at(m_timer.expires_at() + posix_time::millisec(2000));
-        m_timer.async_wait(boost::bind(&CTalk_to_server::start_timer, this, boost::asio::placeholders::error));
     }
 }
 
+#if defined(ASIO_SSL)
 talk_to_server_ptr CTalk_to_server::create_client(boost::asio::ip::tcp::endpoint ep, boost::asio::io_service &ios,
                                                   boost::asio::ssl::context &m,
                                                   boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
@@ -73,23 +116,65 @@ talk_to_server_ptr CTalk_to_server::create_client(boost::asio::ip::tcp::endpoint
     new_->start(ep);
     return new_;
 }
+#elif defined(ASIO_TCP)
 
+talk_to_server_ptr CTalk_to_server::create_client(boost::asio::ip::tcp::endpoint ep, boost::asio::io_service &ios,
+                                                  boost::asio::ip::tcp::resolver::iterator endpoint_iterator) {
+    talk_to_server_ptr new_(new CTalk_to_server(ios, endpoint_iterator));
+    new_->start(ep);
+    return new_;
+}
+
+#elif defined(ASIO_LOCAL)
+
+talk_to_server_ptr CTalk_to_server::create_client(boost::asio::io_service &ios,const std::string filename) {
+    talk_to_server_ptr new_(new CTalk_to_server(ios,filename));
+    new_->start();
+    return new_;
+}
+
+#else
+#endif
+
+
+
+#if defined(ASIO_SSL)
 void CTalk_to_server::start(boost::asio::ip::tcp::endpoint ep) {
     m_ep = ep;
-#ifdef ASIO_SSL
     m_socket.lowest_layer().async_connect(ep, boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
-                                                         boost::asio::placeholders::error));
-#else
+                                                          boost::asio::placeholders::error));
+    cout << m_socket.lowest_layer().native() << endl;
+    }
+#elif defined(ASIO_TCP)
+void CTalk_to_server::start(boost::asio::ip::tcp::endpoint ep) {
+    m_ep = ep;
     m_socket.async_connect(ep, boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
                                            boost::asio::placeholders::error));
+    cout << m_socket.native() << endl;
+    }
+
+#elif defined(ASIO_LOCAL)
+void CTalk_to_server::start() {
+
+    m_socket.async_connect(stream_protocol::endpoint(LINUX_DOMAIN),
+                           boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
+                                       boost::asio::placeholders::error));
+    cout << m_socket.native() << endl;
+    }
 #endif
 
-#if 0
-    boost::asio::async_connect(m_socket.lowest_layer(), m_endpoint_iterator,
-                               boost::bind(&CTalk_to_server::handle_connect, shared_from_this(),
-                                           boost::asio::placeholders::error));
-#endif
 
+
+int CTalk_to_server::get_native_fd() {
+#if defined(ASIO_SSL)
+    return m_socket.lowest_layer().native();
+#elif defined(ASIO_TCP)
+    return m_socket.native();
+#elif defined(ASIO_LOCAL)
+    return m_socket.native();
+#else
+
+#endif
 }
 
 void CTalk_to_server::handle_connect(const boost::system::error_code &err) {
@@ -99,7 +184,7 @@ void CTalk_to_server::handle_connect(const boost::system::error_code &err) {
                                  boost::bind(&CTalk_to_server::handle_handshake, shared_from_this(),
                                              boost::asio::placeholders::error));
 #else
-        hbla_log_info("%d connect server sucess", m_socket.native());
+        hbla_log_info("%d connect server sucess", get_native_fd());
         m_bStart = true;
         do_read();
         send_msg();
@@ -113,10 +198,11 @@ void CTalk_to_server::handle_connect(const boost::system::error_code &err) {
 }
 
 #ifdef ASIO_SSL
+
 void CTalk_to_server::handle_handshake(const boost::system::error_code &error) {
     if (!error) {
         m_bStart = true;
-        hbla_log_info("%d handle_handshake success", m_socket.lowest_layer().native());
+        hbla_log_info("%d handle_handshake success", get_native_fd());
         do_read();
         send_msg();
     } else {
@@ -124,6 +210,7 @@ void CTalk_to_server::handle_handshake(const boost::system::error_code &error) {
         close();
     }
 }
+
 #endif
 
 
@@ -144,13 +231,14 @@ bool CTalk_to_server::started() const {
 
 int CTalk_to_server::read_completion(const boost::system::error_code &ec, size_t bytes_transferred) {
     if (ec) {
+        cout << "ec.value" << ec.message() << endl;
         return 0;
     } else {
         if (bytes_transferred == sizeof(uint16_t)) {
             uint16_t head;
             memcpy(&head, m_read_buf, sizeof(uint16_t));
             headlen = ntohs(head);
-            //cout << "headlen" << headlen << endl;
+            cout << "headlen " << headlen << endl;
         }
         if (headlen + sizeof(uint16_t) == bytes_transferred) {
             headlen = 0;
@@ -161,22 +249,6 @@ int CTalk_to_server::read_completion(const boost::system::error_code &ec, size_t
 }
 
 void CTalk_to_server::do_read() {
-#if 0
-    boost::shared_ptr<std::vector<char>> read_ptr(new std::vector<char>(max_msg, 0));
-    m_socket.async_read_some(boost::asio::buffer(*read_ptr),
-                             boost::bind(&CTalk_to_server::handle_read, shared_from_this(), read_ptr,
-                                         boost::asio::placeholders::error,
-                                         boost::asio::placeholders::bytes_transferred()));
-#endif
-
-#if 0
-    boost::shared_ptr<std::vector<char>> read_ptr(new std::vector<char>(max_msg, 0));
-    m_read_ptr= read_ptr;
-    async_read(m_socket,boost::asio::buffer(*read_ptr),transfer_exactly(MAX_MSG),
-                             boost::bind(&CTalk_to_server::handle_read, shared_from_this(), read_ptr,
-                                         boost::asio::placeholders::error,
-                                         boost::asio::placeholders::bytes_transferred()));
-#endif
 
     memset(m_read_buf, 0, MAX_MSG);
 #if defined(LEN_BODY)
@@ -215,16 +287,11 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
 #else
         message = m_read_buf+2;
 #endif
-
-#ifdef ASIO_SSL
-        m_receive_data(message, bytes, m_socket.lowest_layer().native(),m_read_count);
-#else
-        hbla_log_info("read count %d", m_read_count++);
-        m_receive_data(message, bytes, m_socket.native());
-#endif
+        hbla_log_info("handle read count %d", m_read_count++);
+        m_receive_data(message, bytes, get_native_fd());
         do_read();
     } else {
-        if (err.value() != boost::system::errc::operation_canceled && err.value()!=2) {
+        if (err.value() != boost::system::errc::operation_canceled && err.value() != error::eof/*2*/) {
             hbla_log_error("bytes:%d err value:%d %s", bytes, err.value(), err.message().c_str());
         }
         //当bytes =0时表示，非阻塞套接字,读取时没有数据返回0,服务端断开连接 bytes =0
@@ -235,7 +302,7 @@ CTalk_to_server::handle_read(const boost::system::error_code &err,
 }
 
 
-void CTalk_to_server::do_write(const std::string &msg) {
+void CTalk_to_server::do_send(const std::string &msg) {
 
 #if 1
     pthread_mutex_lock(&send_msg_lock);
@@ -246,44 +313,28 @@ void CTalk_to_server::do_write(const std::string &msg) {
 #endif
 
 #if 0
-    cout << "write:" << msg << endl;
-    m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
-                                                       boost::asio::placeholders::error,
-                                                      boost::asio::placeholders::bytes_transferred()));
-#endif
-}
-
-void CTalk_to_server::handle_write(const boost::system::error_code &err, size_t bytes) {
-    if (err) {
-        hbla_log_error("handle_write err %s", err.message().c_str());
-        close();
-    } else {
-    }
-}
-
-void CTalk_to_server::set_receive_data(void *receivedata) {
-    m_receive_data = (ReceiveData) (receivedata);
-}
-
-void CTalk_to_server::close() {
-    boost::recursive_mutex::scoped_lock lk(g_mutex);
-#ifdef ASIO_SSL
-    if (m_socket.lowest_layer().is_open()) {
-    m_socket.lowest_layer().close();
-    //m_socket.lowest_layer().shutdown();
-    //m_socket.shutdown();
-}
+    packer m_packer;
+#if defined(LEN_BODY)
+    string result = m_packer.pack_msg_len_body(msg);
+        m_socket.async_write_some(buffer(result), boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
+#elif defined(FIX_LEN)
+    string result = m_packer.pack_msg_fix_length(msg,MAX_MSG);
+    //cout << "msg.size()" << msg.size() << endl;
+    async_write(m_socket,buffer(result,MAX_MSG),boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                                                 boost::asio::placeholders::error,
+                                                                 boost::asio::placeholders::bytes_transferred()));
 #else
-    if (m_socket.is_open()) {
-        m_socket.close();
-    }
+    string result = m_packer.pack_msg_len_body(msg);
+        m_socket.async_write_some(buffer(result), boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
 #endif
-    if(m_bStart)
-    {
-        hbla_log_info("client is closing");
-    }
-    m_bStart = false;
+#endif
 }
+
+int nsend = 0;
 
 void *CTalk_to_server::write_func(void *arg) {
 #if 1
@@ -299,47 +350,9 @@ void *CTalk_to_server::write_func(void *arg) {
             pthread_cond_wait(&send_msg_cont, &send_msg_lock);
         }
 
-        string body = client->m_vSendMsg.front();
-        //auto total_len = body.size();
-        //auto head_len = htons(body.size());
-        //string *msg = new string;
-        //msg->reserve(total_len);
-        //msg->append((const char *) &head_len, sizeof(uint16_t));
-        //msg->append(body);
-        packer m_packer;
-#if defined(LEN_BODY)
-        string msg = m_packer.pack_msg_len_body(body);
-        client->m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, client,
-                                                                   boost::asio::placeholders::error,
-                                                                   boost::asio::placeholders::bytes_transferred()));
-#elif defined(FIX_LEN)
-        string msg = m_packer.pack_msg_fix_length(body,MAX_MSG);
-        async_write(client->m_socket,buffer(msg,MAX_MSG),boost::bind(&CTalk_to_server::handle_write, client,
-                                                                   boost::asio::placeholders::error,
-                                                                   boost::asio::placeholders::bytes_transferred()));
-#else
-        string msg = m_packer.pack_msg_len_body(body);
-        client->m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, client,
-                                                                   boost::asio::placeholders::error,
-                                                                   boost::asio::placeholders::bytes_transferred()));
-#endif
-
-
-#if 0
-        char write_buffer[max_msg] = {0};
-        std::copy(body.begin(), body.end(), write_buffer);
-        asio::async_write(client->m_socket, buffer(write_buffer, max_msg),
-                          boost::bind(&CTalk_to_server::handle_write, client,
-                                      boost::asio::placeholders::error,
-                                      boost::asio::placeholders::bytes_transferred()));
-#endif
-#if 0
-        asio::async_write(client->m_socket, buffer(msg, msg.size()),
-                          boost::bind(&CTalk_to_server::handle_write, client,
-                                      boost::asio::placeholders::error,
-                                      boost::asio::placeholders::bytes_transferred()));
-#endif
-
+        string msg = client->m_vSendMsg.front();
+        //sleep(1);
+        client->m_service.post(boost::bind(&CTalk_to_server::do_write, client, msg));
         client->m_vSendMsg.pop();
         pthread_mutex_unlock(&send_msg_lock);
     }
@@ -347,6 +360,91 @@ void *CTalk_to_server::write_func(void *arg) {
 #endif
     return NULL;
 }
+
+
+void CTalk_to_server::do_write(const string msg) {
+    bool write_in_progress = !m_message_queue.empty();
+    m_message_queue.push_back(msg);
+    if (!write_in_progress) {
+        packer m_packer;
+#if defined(LEN_BODY)
+        cout << "body ";
+        string result = m_packer.pack_msg_len_body(m_message_queue.front());
+        cout << result.size() << endl;
+        async_write(m_socket, buffer(result, result.size()),
+                    boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                boost::asio::placeholders::error,
+                                boost::asio::placeholders::bytes_transferred()));
+#elif defined(FIX_LEN)
+        string result = m_packer.pack_msg_fix_length(m_message_queue.front(), MAX_MSG);
+    async_write(m_socket, buffer(result, MAX_MSG), boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                                                    boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred()));
+#else
+    string result = m_packer.pack_msg_len_body(m_message_queue.front());
+        m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, shared_from_this,
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
+#endif
+    }
+
+}
+
+
+int ntest = 0;
+
+void CTalk_to_server::handle_write(const boost::system::error_code &err, size_t bytes) {
+    if (err) {
+        hbla_log_error("handle_write err %s", err.message().c_str());
+        close();
+    } else {
+        hbla_log_info("client success send ntestcount = %d   ,%d", ntest++, bytes);
+        m_message_queue.pop_front();
+        if (!m_message_queue.empty()) {
+            packer m_packer;
+#if defined(LEN_BODY)
+            cout << "body ";
+            string msg = m_packer.pack_msg_len_body(m_message_queue.front());
+            cout << msg.size() << endl;
+            async_write(m_socket, buffer(msg, msg.size()),
+                        boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                    boost::asio::placeholders::error,
+                                    boost::asio::placeholders::bytes_transferred()));
+#elif defined(FIX_LEN)
+            string msg = m_packer.pack_msg_fix_length(m_message_queue.front(), MAX_MSG);
+    async_write(m_socket, buffer(msg, MAX_MSG), boost::bind(&CTalk_to_server::handle_write, shared_from_this(),
+                                                                    boost::asio::placeholders::error, boost::asio::placeholders::bytes_transferred()));
+#else
+    string msg = m_packer.pack_msg_len_body(m_message_queue.front());
+        m_socket.async_write_some(buffer(msg), boost::bind(&CTalk_to_server::handle_write, shared_from_this,
+                                                                   boost::asio::placeholders::error,
+                                                                   boost::asio::placeholders::bytes_transferred()));
+#endif
+        }
+
+    }
+}
+
+void CTalk_to_server::set_receive_data(void *receivedata) {
+    m_receive_data = (ReceiveData) (receivedata);
+}
+
+void CTalk_to_server::close() {
+    boost::recursive_mutex::scoped_lock lk(g_mutex);
+#ifdef ASIO_SSL
+    if (m_socket.lowest_layer().is_open()) {
+        m_socket.lowest_layer().close();
+    }
+#else
+    if (m_socket.is_open()) {
+        m_socket.close();
+    }
+#endif
+    if (m_bStart) {
+        hbla_log_info("client is closing");
+    }
+    m_bStart = false;
+}
+
 
 void CTalk_to_server::send_msg() {
 

@@ -1,0 +1,60 @@
+//
+// Created by huanghao on 19-5-22.
+//
+#include <iostream>
+#include <string>
+//#include <boost/>
+#include "server.h"
+//#include "talk_to_client.h"
+//#include "common.h"
+#include "hbla_log4.h"
+
+using namespace std;
+#define LINUX_DOMAIN "/tmp/byhj.domain"
+HbLog *hb_log = new HbLog();
+//boost::asio::io_service service;
+CServer server("172.16.0.183", 8888, asio::ssl::context::sslv23_server);//这里有bug,不能让ip作为参数
+//CServer server("172.16.0.183", 8888);
+//CServer server(LINUX_DOMAIN);
+int ncount = 0;
+boost::recursive_mutex m_mutex;
+
+void receive_data(std::string &message, int bytes, int fd) {
+
+    boost::recursive_mutex::scoped_lock lk(m_mutex);
+    cout << "message:" << message << " bytes: " << bytes << "  fd " << fd << endl;
+    cout << "ncount" << ncount++ << endl;
+    string msg = "123456";
+    server.send_msg(fd, msg);
+    return;
+}
+
+
+int main() {
+    cout << "server" << endl;
+    server.context().set_options(
+            boost::asio::ssl::context::default_workarounds | boost::asio::ssl::context::no_sslv2 |
+            boost::asio::ssl::context::single_dh_use);
+    server.context().set_verify_mode(asio::ssl::context::verify_peer | asio::ssl::context::verify_fail_if_no_peer_cert);
+#if 0
+    server.context().load_verify_file("client_certs/client.crt");
+    server.context().use_certificate_chain_file("certs/server.crt");
+    server.context().use_private_key_file("certs/priv.key", asio::ssl::context::pem);
+#endif
+#if 1
+    server.context().load_verify_file("client_certs/server.crt");
+    server.context().use_certificate_chain_file("certs/server.crt");
+    server.context().use_private_key_file("certs/server.key", asio::ssl::context::pem);
+    server.context().use_tmp_dh_file("certs/dh1024.pem");
+#endif
+    server.set_receive_data((void *) receive_data);
+    server.start();
+    //sleep(10);
+    //server.stop();
+    server.start_listen();
+    while (1) {
+        cout << "while" << endl;
+        sleep(1);
+    }
+    return 0;
+}

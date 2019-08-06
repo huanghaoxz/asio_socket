@@ -10,37 +10,33 @@
 #include "hbla_log4.h"
 
 using namespace std;
-
+#define LINUX_DOMAIN "/tmp/byhj.domain"
 HbLog *hb_log = new HbLog();
 //boost::asio::io_service service;
-CServer server("10.0.1.106", 8888, asio::ssl::context::sslv23_server);
-
+//CServer server("172.16.0.183", 8888, asio::ssl::context::sslv23_server);//这里有bug,不能让ip作为参数
+CServer server("172.16.0.183", 8888);
+//CServer server(LINUX_DOMAIN);
 int ncount = 0;
 boost::recursive_mutex m_mutex;
-void receive_data(std::string &message, int bytes, int fd,int &nstatics) {
+
+void receive_data(std::string &message, int bytes, int fd) {
 
     boost::recursive_mutex::scoped_lock lk(m_mutex);
-    cout <<"message:" << message <<" bytes: " << bytes << "  fd " << fd <<endl;
-    cout << "ncount"<< ncount++<<endl;
-    string msg  = "123456";
-    server.send_msg(fd,msg);
+    cout << "message:" << message << " bytes: " << bytes << "  fd " << fd << endl;
+    cout << "ncount" << ncount++ << endl;
+    string msg = "123456";
+    server.send_msg(fd, msg);
     return;
 }
 
+
 int main() {
     cout << "server" << endl;
-    //string ip = "10.0.1.106";
-    //short port = 8888;
-    //CServer server(ip,port);
-    server.context().set_options(
-            asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 | asio::ssl::context::single_dh_use);
-    server.context().set_verify_mode(asio::ssl::context::verify_peer | asio::ssl::context::verify_fail_if_no_peer_cert);
-    server.context().load_verify_file("client_certs/client.crt");
-    server.context().use_certificate_chain_file("certs/server.crt");
-    server.context().use_private_key_file("certs/priv.key", asio::ssl::context::pem);
     server.set_receive_data((void *) receive_data);
     server.start();
+    server.start_listen();
     while (1) {
+        cout << "while" << endl;
         sleep(1);
     }
     return 0;

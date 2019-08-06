@@ -11,6 +11,8 @@ INCLUDE_DIRECTORIES(
         ../../basemode/log4/include
         /usr/local/log4cpp/include/
         /usr/local/boost/include/
+        /usr/local/openssl/include/
+        /usr/local/msgpack/include/
 )
 
 LINK_DIRECTORIES(
@@ -18,6 +20,8 @@ LINK_DIRECTORIES(
         ../../basemode/log4/libs/
         /usr/local/log4cpp/lib/
         /usr/local/boost/lib/
+        /usr/local/openssl/lib/
+        /usr/local/msgpack/lib/
 )
 
 #指的是当前处理的 CMakeLists.txt 所在的路径
@@ -31,6 +35,7 @@ TARGET_LINK_LIBRARIES(client
         hb_log4
         boost_system
         boost_thread
+        msgpackc
         crypto
         ssl
         dl

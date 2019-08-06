@@ -7,12 +7,13 @@
 
 #include <boost/asio/ssl.hpp>
 
-//#define MAX_MSG_NUM 2048
 #define THREAD_NUM 1
 #define MAX_MSG 2048
-//#define ASIO_SSL
 #define LEN_BODY
 //#define FIX_LEN
+#define ASIO_TCP
+//#define ASIO_SSL
+//#define ASIO_LOCAL
 
 class CTalk_to_client;
 typedef boost::shared_ptr<CTalk_to_client> client_ptr;
@@ -26,5 +27,10 @@ typedef boost::shared_ptr<CTalk_to_server>  talk_to_server_ptr;
 typedef std::vector<client_ptr> array_clients;
 
 typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> ssl_socket;
+
+#ifdef ASIO_LOCAL
+typedef boost::asio::local::stream_protocol::socket local_socket;
+#define LINUX_DOMAIN "/tmp/byhj.domain"
+#endif
 
 #endif //HBAUDITFLOW_COMMON_H
